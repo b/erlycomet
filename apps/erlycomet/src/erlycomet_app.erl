@@ -1,10 +1,10 @@
-%% @author author <author@example.com>
-%% @copyright YYYY author.
+%% @author Benjamin Black <b@b3k.us>
+%% @copyright 2010 Benjamin Black.
 
 %% @doc Callbacks for the erlycomet application.
 
 -module(erlycomet_app).
--author('author <author@example.com>').
+-author('Benjamin Black <b@b3k.us>').
 
 -behaviour(application).
 -export([start/2,stop/1]).
