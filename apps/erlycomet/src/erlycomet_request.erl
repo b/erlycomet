@@ -350,11 +350,11 @@ disconnect(Resp, Id, Callback) ->
 rpc({struct, [{<<"id">>, Id}, {<<"method">>, Method}, {<<"params">>, Params}]}, Channel) ->
   Func = list_to_atom(binary_to_list(Method)),
   case catch apply(CustomAppModule, Func, [Channel | Params]) of
-  {'EXIT', _} ->
-    {struct, [{result, null}, {error, <<"RPC failure">>}, {id, Id}]};
-  {error, Reason} ->
-    {struct, [{result, null}, {error, Reason}, {id, Id}]};
-  Value ->
-    {struct, [{result, Value}, {error, null}, {id, Id}]}
+    {'EXIT', _} ->
+      {struct, [{result, null}, {error, <<"RPC failure">>}, {id, Id}]};
+    {error, Reason} ->
+      {struct, [{result, null}, {error, Reason}, {id, Id}]};
+    Value ->
+      {struct, [{result, Value}, {error, null}, {id, Id}]}
   end;
 rpc(Msg, _) -> Msg.

@@ -196,6 +196,6 @@ up_master() ->
 
 create_table(Name, Args) ->
   case mnesia:create_table(Name, Args) of
-      {atomic, ok} -> ok;
-      {aborted, {already_exists, _}} -> ok
+    {atomic, ok} -> ok;
+    {aborted, {already_exists, _}} -> ok
   end.
