@@ -38,7 +38,7 @@
 %% API
 -export([handle/1]).
 
--include("erlycomet.hrl").
+-include_lib("include/erlycomet.hrl").
 
 -record(state, {
     id = undefined,

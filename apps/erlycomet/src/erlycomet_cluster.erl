@@ -36,7 +36,7 @@
 
 -behaviour(gen_server).
 
--include("erlycomet.hrl").
+-include_lib("include/erlycomet.hrl").
 
 
 %% API

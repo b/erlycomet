@@ -33,7 +33,7 @@
 -module(erlycomet_api).
 -author('rsaccon@gmail.com').
 -author('telarson@gmail.com').
--include("erlycomet.hrl").
+-include_lib("include/erlycomet.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
 

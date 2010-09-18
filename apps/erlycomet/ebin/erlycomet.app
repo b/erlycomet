@@ -1,0 +1,16 @@
+{application, erlycomet,
+  [
+    {description, "Erlang Comet Server"},
+    {vsn, "0.1"},
+    {modules, [erlycomet_app,
+               erlycomet_sup,
+               erlycomet_request,
+			         erlycomet_api,
+			         erlycomet_cluster,
+               gen_server_cluster]},
+    {registered, []},
+    {applications, [kernel,
+                    stdlib,
+                    crypto]},
+    {env, []},
+    {mod, {erlycomet_app, []}} ]}.
