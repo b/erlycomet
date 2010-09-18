@@ -42,7 +42,7 @@
 %% API
 -export([start/0, 
          stop/0,
-		 is_global/0]).
+         is_global/0]).
 
 %% gen_server callbacks
 -export([init/1, 
@@ -65,21 +65,21 @@
 %% @end 
 %%--------------------------------------------------------------------
 start() ->
-    Start = gen_server_cluster:start(?MODULE, ?MODULE, [], []),
-    Node = node(),
-    case catch gen_server_cluster:get_all_server_nodes(?MODULE) of
-	    {Node, _} ->
-	        up_master();
-        {Master, _}->
-            gen_server:call(Master, add_mnesia_slave),
-            mnesia:start(),
-            mnesia:change_config(extra_db_nodes, [Node])
-    end,
-    Start.
+  Start = gen_server_cluster:start(?MODULE, ?MODULE, [], []),
+  Node = node(),
+  case catch gen_server_cluster:get_all_server_nodes(?MODULE) of
+    {Node, _} ->
+      up_master();
+    {Master, _}->
+      gen_server:call(Master, add_mnesia_slave),
+      mnesia:start(),
+      mnesia:change_config(extra_db_nodes, [Node])
+  end,
+  Start.
 
 stop() -> 
-    mnesia:stop(), %TODO: NEED To stop mnesia on each node. ?????
-    gen_server:stop({global, ?MODULE}).
+  mnesia:stop(), %TODO: NEED To stop mnesia on each node. ?????
+  gen_server:stop({global, ?MODULE}).
 
 
 %%-------------------------------------------------------------------------
@@ -88,13 +88,13 @@ stop() ->
 %% @end
 %%-------------------------------------------------------------------------
 is_global() ->
-    LocalNode = node(),
-    case catch gen_server_cluster:get_all_server_nodes(?MODULE) of
-	    {LocalNode, _} ->
-	        true;
-        _ ->
-	        false
-    end.
+  LocalNode = node(),
+  case catch gen_server_cluster:get_all_server_nodes(?MODULE) of
+    {LocalNode, _} ->
+      true;
+    _ ->
+      false
+  end.
 
 
 %%====================================================================
@@ -110,7 +110,7 @@ is_global() ->
 %% @end 
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, #state{}}.
+  {ok, #state{}}.
 
 
 %%--------------------------------------------------------------------
@@ -125,12 +125,12 @@ init([]) ->
 %% @end 
 %%--------------------------------------------------------------------
 handle_call(add_mnesia_slave, From, State) ->
-    mnesia:add_table_copy(schema, From, ram_copies),
-    {reply, ok, State};
+  mnesia:add_table_copy(schema, From, ram_copies),
+  {reply, ok, State};
 
 handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+  Reply = ok,
+  {reply, Reply, State}.
     
 
 %%--------------------------------------------------------------------
@@ -141,7 +141,7 @@ handle_call(_Request, _From, State) ->
 %% @end 
 %%--------------------------------------------------------------------
 handle_cast(_Msg, State) ->
-    {noreply, State}.
+  {noreply, State}.
 
 
 %%--------------------------------------------------------------------
@@ -152,7 +152,7 @@ handle_cast(_Msg, State) ->
 %% @end 
 %%--------------------------------------------------------------------
 handle_info(_Info, State) ->
-    {noreply, State}.
+  {noreply, State}.
 
 
 %%--------------------------------------------------------------------
@@ -164,7 +164,7 @@ handle_info(_Info, State) ->
 %% @end 
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) ->
-    ok.
+  ok.
 
 
 %%--------------------------------------------------------------------
@@ -173,7 +173,7 @@ terminate(_Reason, _State) ->
 %% @end 
 %%--------------------------------------------------------------------
 code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+  {ok, State}.
 
 
 %%--------------------------------------------------------------------
@@ -181,21 +181,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 
 mnesia_tables() ->
-    [{connection,
-      [{ram_copies, [node()]},
-       {attributes, record_info(fields, connection)}]},
-     {channel,
-      [{ram_copies, [node()]},
-       {attributes, record_info(fields, channel)}]}].
+  [{connection,
+    [{ram_copies, [node()]},
+     {attributes, record_info(fields, connection)}]},
+   {channel,
+    [{ram_copies, [node()]},
+     {attributes, record_info(fields, channel)}]}].
        
 
 up_master() ->
-    mnesia:start(),
-    lists:foreach(fun ({Name, Args}) ->
-			  case mnesia:create_table(Name, Args) of
-			      {atomic, ok} -> ok;
-			      {aborted, {already_exists, _}} -> ok
-			  end
-		  end,
-		  mnesia_tables()).
+  mnesia:start(),
+  [create_table(Name, Args) || {Name, Args} <- mnesia_tables()].
 
+
+create_table(Name, Args) ->
+  case mnesia:create_table(Name, Args) of
+      {atomic, ok} -> ok;
+      {aborted, {already_exists, _}} -> ok
+  end.

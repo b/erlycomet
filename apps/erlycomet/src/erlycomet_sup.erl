@@ -78,17 +78,17 @@ upgrade() ->
 %% @end 
 %%--------------------------------------------------------------------
 init([]) ->	
-    RestartStrategy = one_for_one,
-    MaxRestarts = 10,
-    MaxTimeBetweenRestarts = 10,
-    SupFlags  = {RestartStrategy, MaxRestarts, MaxTimeBetweenRestarts},
-    ErlyComet = {erlycomet_cluster,
-        {erlycomet_cluster, start, []},
-        permanent,
-        1000,
-        worker,
-        [erlycomet_cluster]},
-    {ok,{SupFlags, [ErlyComet]}}.
+  RestartStrategy = one_for_one,
+  MaxRestarts = 10,
+  MaxTimeBetweenRestarts = 10,
+  SupFlags  = {RestartStrategy, MaxRestarts, MaxTimeBetweenRestarts},
+  ErlyComet = {erlycomet_cluster,
+    {erlycomet_cluster, start, []},
+    permanent,
+    1000,
+    worker,
+    [erlycomet_cluster]},
+  {ok,{SupFlags, [ErlyComet]}}.
 
 
 %%====================================================================
