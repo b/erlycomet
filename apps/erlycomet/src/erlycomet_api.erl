@@ -79,27 +79,27 @@ add_connection(ClientId, Pid) ->
 replace_connection(ClientId, Pid, NewState) ->
   replace_connection(ClientId, Pid, NewState, not_specified).
 
-replace_connection(ClientId, Pid, NewState, CommentFiltered) -> 
-  E = #connection{client_id=ClientId, pid=Pid, comment_filtered=CommentFiltered, state=NewState},
+replace_connection(ClientId, Pid, NewState, _CommentFiltered) -> 
+  E = #connection{client_id=ClientId, pid=Pid, state=NewState},
   F1 = fun() -> mnesia:read({connection, ClientId}) end,
   {Status, F2} = case mnesia:transaction(F1) of
     {atomic, EA} ->
       case EA of
         [] ->
           {new, fun() -> mnesia:write(E) end};
-        [#connection{comment_filtered=CF, state=State}] ->
-        ER = case CommentFiltered of
-          not_specified ->
-            E#connection{comment_filtered=CF};
-          _ ->
-            E
-        end,
-        case State of
-          handshake ->
-            {replaced_hs, fun() -> mnesia:write(ER) end};
-          _ ->
-            {replaced, fun() -> mnesia:write(ER) end}
-        end
+        [#connection{state=State}] ->
+          ER = false, %case CommentFiltered of
+            %not_specified ->
+            %  E#connection{comment_filtered=CF};
+            %_ ->
+            %  E
+          %end,
+          case State of
+            handshake ->
+              {replaced_hs, fun() -> mnesia:write(ER) end};
+            _ ->
+              {replaced, fun() -> mnesia:write(ER) end}
+          end
       end;
     _ ->
       {new, fun() -> mnesia:write(E) end}

@@ -40,9 +40,18 @@
 
 -include_lib("include/erlycomet.hrl").
 
+-define(accuracy_target, 25).
+
+-record(timesync, {
+    ts = 0,
+    tc = 0,
+    l = 0,
+    o = 0}).
+
 -record(state, {
     id = undefined,
     connection_type,
+    timesync = #timesync{},
     events = [],
     timeout = 1200000,      %% 20 min, just for testing
     callback = undefined}).  
@@ -85,7 +94,7 @@ handle(Req, #parsed_req{message = Msg, jsonp = Callback})
       [done] -> ok;
       Body -> 
         Resp = callback_wrapper(json_encode(Body), Callback),       
-        Req:ok({"application/javascript", Resp})   
+        Req:ok({"text/javascript;charset=UTF-8", Resp})   
     end;       
 handle(Req, #parsed_req{message = Msg})
   when Msg =/= undefined ->
@@ -103,18 +112,10 @@ handle(Req, _Parsed) ->
 %% Internal functions
 %%====================================================================
 
+process_bayeux_msg(Req, JsonObj, Callback) when is_list(JsonObj) ->
+  [ process_msg(Req, X, Callback) || X <- JsonObj ];
 process_bayeux_msg(Req, JsonObj, Callback) ->
-  case JsonObj of   
-    Array when is_list(Array) -> 
-      Out  = [ process_msg(Req, X, Callback) || X <- Array ],
-      Out1 = [ Msg || {comment, Msg} <- Out],
-      case Out1 of 
-          [] -> Out;
-          _ -> {comment, Out1}
-      end;
-    Struct-> 
-      process_msg(Req, Struct, Callback)
-  end.
+  process_msg(Req, JsonObj, Callback).
 
 
 process_msg(Req, Struct, Callback) ->
@@ -135,44 +136,51 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
   %                   {interval, 5000}]},
   % - get the alert from 
   Ext = get_json_map_val(<<"ext">>, Struct),
+  TSyncReq = timesync_req(proplists:get_value(timesync, Ext)),
+  
   Id = generate_id(),
-  CF = case get_json_map_val(<<"json-comment-filtered">>, Ext) of
-    true -> true;
-    _ -> false
-  end,
-  erlycomet_api:replace_connection(Id, 0, handshake, CF),
-  Ext1 = {struct, [{'json-comment-filtered', CF}]}, %not sure if this is necessary
-  JsonResp = {struct, [
+  erlycomet_api:replace_connection(Id, 0, handshake, false),
+  {struct, [
     {channel, Channel}, 
     {version, 1.0},
     {supportedConnectionTypes, [
         <<"long-polling">>,
         <<"callback-polling">>]},
     {clientId, Id},
-    {successful, true},
-    {ext, Ext1}]},
-  % Resp2 = [{advice, Advice} | Resp],
-  comment_filter(JsonResp, CF);
+    {ext, {struct, timesync_res(TSyncReq)}},
+    {successful, true}]};
     
 process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->  
   ClientId = get_json_map_val(<<"clientId">>, Struct),
   ConnectionType = get_json_map_val(<<"connectionType">>, Struct),
+  Ext = get_json_map_val(<<"ext">>, Struct),
+  TSyncReq = timesync_req(proplists:get_value(timesync, Ext)),
+  
   L = [{channel,  Channel}, {clientId, ClientId}],    
   case erlycomet_api:replace_connection(ClientId, self(), connected) of
     {ok, Status} when Status =:= ok ; Status =:= replaced_hs ->
-      comment_filter({struct, [{successful, true} | L]}, erlycomet_api:connection(ClientId));
-      % don't reply immediately to new connect message.
-      % instead wait. when new message is received, reply to connect and 
-      % include the new message.  This is acceptable given bayeux spec. see section 4.2.2
+      {struct,
+        lists:flatten(
+          [{ext, {struct, timesync_res(TSyncReq)}}],
+          [{successful, true}],
+          L)};
+    % don't reply immediately to new connect message.
+    % instead wait. when new message is received, reply to connect and 
+    % include the new message.  This is acceptable given bayeux spec. see section 4.2.2
     {ok, replaced} ->   
       Msg  = {struct, [{successful, true} | L]},
       Resp = Req:respond({200, [], chunked}),
       loop(Resp, #state{id = ClientId, 
           connection_type = ConnectionType,
+          timesync = TSyncReq,
           events = [Msg],
           callback = Callback});
     _ ->
-      comment_filter({struct, [{successful, false} | L]}, erlycomet_api:connection(ClientId))
+      {struct,
+        lists:flatten(
+          [{ext, {struct, timesync_res(TSyncReq)}}],
+          [{successful, false}],
+          L)}
   end;    
            
 process_cmd(Req, <<"/meta/disconnect">> = Channel, Struct, _) ->  
@@ -198,12 +206,12 @@ process_cmd(Req, Channel, Struct, _) ->
 process_cmd1(_, Channel, undefined) ->
   {struct, [{<<"channel">>, Channel}, {successful, false}]};       
 process_cmd1(Req, Channel, Id) ->
-  comment_filter(process_cmd2(Req, Channel, Id), erlycomet_api:connection(Id)).
+  process_cmd2(Req, Channel, Id), erlycomet_api:connection(Id).
 
 process_cmd1(_, Channel, undefined, _) ->   
   {struct, [{<<"channel">>, Channel}, {successful, false}]};  
 process_cmd1(Req, Channel, Id, Data) ->
-  comment_filter(process_cmd2(Req, Channel, Id, Data), erlycomet_api:connection(Id)).
+  process_cmd2(Req, Channel, Id, Data), erlycomet_api:connection(Id).
        
         
 process_cmd2(_, <<"/meta/disconnect">> = Channel, ClientId) -> 
@@ -260,10 +268,8 @@ result_struct(Channel, ClientId, Result) when is_boolean(Result) ->
   {struct, [{successful, Result}  | L]}.
 
 json_decode(Str) ->
-  mochijson2:decode(comment_filter_decode(Str)).
+  mochijson2:decode(Str).
     
-json_encode({comment, Body}) ->
-  comment_filter_encode(mochijson2:encode(Body));
 json_encode(Body) ->
   mochijson2:encode(Body).
 
@@ -272,30 +278,6 @@ callback_wrapper(Data, undefined) ->
   Data;       
 callback_wrapper(Data, Callback) ->
   lists:concat([Callback, "(", Data, ");"]).
-    
-
-comment_filter_decode(Str) ->
-  case Str of 
-    "/*" ++ Rest ->
-      case lists:reverse(Rest) of
-        "/*" ++ Rest2 -> lists:reverse(Rest2);
-        _ -> Str
-      end;
-    _ ->
-      Str
-  end.
-    
-
-comment_filter_encode(Str) ->    
-  lists:concat(["/*", Str, "*/"]).
-
-
-comment_filter(Data, #connection{comment_filtered=CF}=_Row) ->
-  comment_filter(Data, CF);
-comment_filter(Data, true) ->
-  {comment, Data};
-comment_filter(Data, _) ->
-  Data.
      
                 
 generate_id() ->
@@ -309,26 +291,31 @@ generate_id() ->
   end.
 
 
-loop(Resp, #state{events=Events, id=Id, callback=Callback} = State) ->   
+loop(Resp, #state{events=Events, id=Id,
+                  timesync=TSyncReq, callback=Callback} = State) ->
   receive
     stop ->  
       disconnect(Resp, Id, State);
     {add, Event} -> 
       loop(Resp, State#state{events=[Event | Events]});      
-    {flush, Event} -> 
-      Events2 = [Event | Events],
+    {flush, Event} ->
+      Event1 = [{ext, {struct, timesync_res(TSyncReq)}} | Event],
+      Events2 = [Event1 | Events],
       send(Resp, events_to_json_struct(Events2, Id), Callback),
       done;                
-    flush -> 
-      send(Resp, events_to_json_struct(Events, Id), Callback),
+    flush ->
+      [Event | Events2] = Events,
+      Event1 = [{ext, {struct, timesync_res(TSyncReq)}} | Event],
+      Events3 = [Event1 | Events2],
+      send(Resp, events_to_json_struct(Events3, Id), Callback),
       done 
   after State#state.timeout ->
     disconnect(Resp, Id, Callback)
   end.
 
 
-events_to_json_struct(Events, Id) ->
-  comment_filter(lists:reverse(Events), erlycomet_api:connection(Id)).
+events_to_json_struct(Events, _Id) ->
+  lists:reverse(Events).
   
     
 send(Resp, Data, Callback) ->
@@ -340,8 +327,7 @@ send(Resp, Data, Callback) ->
 disconnect(Resp, Id, Callback) ->
   erlycomet_api:remove_connection(Id),
   Msg = {struct, [{channel, <<"/meta/disconnect">>}, {successful, true}, {clientId, Id}]},
-  Msg2 = comment_filter(Msg, erlycomet_api:connection(Id)),
-  Chunk = callback_wrapper(json_encode(Msg2), Callback),
+  Chunk = callback_wrapper(json_encode(Msg), Callback),
   Resp:write_chunk(Chunk),
   Resp:write_chunk([]),
   done.
@@ -358,3 +344,52 @@ rpc({struct, [{<<"id">>, Id}, {<<"method">>, Method}, {<<"params">>, Params}]}, 
       {struct, [{result, Value}, {error, null}, {id, Id}]}
   end;
 rpc(Msg, _) -> Msg.
+
+
+%%
+% timesync client request
+%
+% {ext:{timesync:{tc:12345567890,l:23,o:4567},...},...}
+%
+% tc is the client timestamp in ms since 1970 of when the message was sent
+% l is the network lag that the client has calculated
+% o is the clock offset that the client has calculated
+%
+%%
+timesync_req(ClientReq) ->
+  TC = proplists:get_value(tc, ClientReq, now_in_millis()),
+  L = proplists:get_value(l, ClientReq, 0),
+  O = proplists:get_value(o, ClientReq, 0),
+
+  #timesync{ts=now_in_millis(), tc=TC, l=L, o=O}.
+
+%%
+%
+% timesync server response
+%
+% {ext:{timesync:{tc:12345567890,ts:1234567900,p:123,a:3},...},...}
+%
+% tc is the client timestamp of when the message was sent
+% ts is the server timestamp of when the message was received
+% p is the poll duration in ms - ie the time the server took before sending
+%   the response
+% a is the measured accuracy of the calculated offset and lag sent by the
+%   client
+%   -> tc - now - l - o
+%
+% A Bayeux server that supports timesync should respond only if the measured
+% accuracy value is greater than accuracy target.
+%%
+timesync_res(#timesync{ts=TS, tc=TC, l=L, o=O}) ->
+  Now = now_in_millis(),
+  P = Now - TS,
+  A = TC - now_in_millis() - L - O,
+  case A > ?accuracy_target of
+    true -> undefined;
+    false ->
+      [{timesync, {struct, [{tc, TC}, {ts, TS}, {p, P}, {a, A}]}}]
+  end.
+
+now_in_millis() ->
+  {Mega, Sec, Micro} = now(),
+	trunc(((Mega * 1000000) + Sec) * 1000 + (Micro / 1000) + 0.5).

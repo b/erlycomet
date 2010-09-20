@@ -34,7 +34,6 @@
 -record(connection, {
     client_id, 
     pid, 
-    comment_filtered, 
     state}).
 
 -record(channel, {
