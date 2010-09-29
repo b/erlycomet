@@ -35,7 +35,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/1]).
+-export([start_link/0, start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1, upgrade/0]).
@@ -52,6 +52,8 @@
 %% @doc Starts the supervisor
 %% @end 
 %%--------------------------------------------------------------------
+start_link() ->
+    start_link([]).
 start_link(Args) ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, Args).
 

@@ -16,8 +16,7 @@ start(_Type, _StartArgs) ->
 	PidFile = case os:getenv("PIDFILE") of false -> "/var/run/erlycomet.pid"; Any -> Any end,
 	ok = file:write_file(PidFile, list_to_binary(os:getpid())),
 			
-    erlycomet_deps:ensure(),
-    erlycomet_sup:start_link().
+  erlycomet_sup:start_link().
 
 %% @spec stop(_State) -> ServerRet
 %% @doc application stop callback for erlycomet.
