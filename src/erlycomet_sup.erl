@@ -53,9 +53,9 @@
 %% @end 
 %%--------------------------------------------------------------------
 start_link() ->
-    start_link([]).
+  start_link([]).
 start_link(Args) ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, Args).
+  supervisor:start_link({local, ?SERVER}, ?MODULE, Args).
 
 
 %% @spec upgrade() -> ok
@@ -84,13 +84,13 @@ init([]) ->
   MaxRestarts = 10,
   MaxTimeBetweenRestarts = 10,
   SupFlags  = {RestartStrategy, MaxRestarts, MaxTimeBetweenRestarts},
-  ErlyComet = {erlycomet_cluster,
-    {erlycomet_cluster, start, []},
+  CometDb = {erlycomet_db,
+    {erlycomet_db, start_link, []},
     permanent,
     1000,
     worker,
-    [erlycomet_cluster]},
-  {ok,{SupFlags, [ErlyComet]}}.
+    [erlycomet_db]},
+  {ok,{SupFlags, [CometDb]}}.
 
 
 %%====================================================================

@@ -1,7 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @author Roberto Saccon <rsaccon@gmail.com> [http://rsaccon.com]
 %%% @author Tait Larson
+%%% @author Benjamin Black <b@b3k.us>
 %%% @copyright 2007 Roberto Saccon, Tait Larson
+%%% @copyright 2010 Benjamin Black
 %%% @doc 
 %%% Comet extension for MochiWeb
 %%% @end  
@@ -9,6 +11,7 @@
 %%% The MIT License
 %%%
 %%% Copyright (c) 2007 Roberto Saccon, Tait Larson
+%%% Copyright (c) 2010 Benjamin Black
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +36,7 @@
 -module(erlycomet_request, [CustomAppModule]).
 -author('telarson@gmail.com').
 -author('rsaccon@gmail.com').
+-author('b@b3k.us').
 
 
 %% API
@@ -139,7 +143,7 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
   TSyncReq = timesync_req(proplists:get_value(timesync, Ext)),
   
   Id = generate_id(),
-  erlycomet_api:replace_connection(Id, 0, handshake, false),
+  erlycomet_api:replace_connection(Id, 0, handshake),
   {struct, [
     {channel, Channel}, 
     {version, 1.0},
@@ -147,7 +151,7 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
         <<"long-polling">>,
         <<"callback-polling">>]},
     {clientId, Id},
-    {ext, {struct, timesync_res(TSyncReq)}},
+    timesync_ext(TSyncReq),
     {successful, true}]};
     
 process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->  
@@ -161,7 +165,7 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
     {ok, Status} when Status =:= ok ; Status =:= replaced_hs ->
       {struct,
         lists:flatten(
-          [{ext, {struct, timesync_res(TSyncReq)}}],
+          [timesync_ext(TSyncReq)],
           [{successful, true}],
           L)};
     % don't reply immediately to new connect message.
@@ -178,7 +182,7 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
     _ ->
       {struct,
         lists:flatten(
-          [{ext, {struct, timesync_res(TSyncReq)}}],
+          [timesync_ext(TSyncReq)],
           [{successful, false}],
           L)}
   end;    
@@ -284,10 +288,8 @@ generate_id() ->
   <<Num:128>> = crypto:rand_bytes(16),
   [HexStr] = io_lib:fwrite("~.16B",[Num]),
   case erlycomet_api:connection_pid(HexStr) of
-    undefined ->
-        HexStr;
-    _ ->
-      generate_id()
+    undefined -> HexStr;
+    _ -> generate_id()
   end.
 
 
@@ -299,13 +301,13 @@ loop(Resp, #state{events=Events, id=Id,
     {add, Event} -> 
       loop(Resp, State#state{events=[Event | Events]});      
     {flush, Event} ->
-      Event1 = [{ext, {struct, timesync_res(TSyncReq)}} | Event],
+      Event1 = [timesync_ext(TSyncReq) | Event],
       Events2 = [Event1 | Events],
       send(Resp, events_to_json_struct(Events2, Id), Callback),
       done;                
     flush ->
       [Event | Events2] = Events,
-      Event1 = [{ext, {struct, timesync_res(TSyncReq)}} | Event],
+      Event1 = [timesync_ext(TSyncReq) | Event],
       Events3 = [Event1 | Events2],
       send(Resp, events_to_json_struct(Events3, Id), Callback),
       done 
@@ -385,11 +387,14 @@ timesync_res(#timesync{ts=TS, tc=TC, l=L, o=O}) ->
   P = Now - TS,
   A = TC - now_in_millis() - L - O,
   case A > ?accuracy_target of
-    true -> undefined;
+    true -> [];
     false ->
       [{timesync, {struct, [{tc, TC}, {ts, TS}, {p, P}, {a, A}]}}]
   end.
 
+timesync_ext(TSyncReq) ->
+  {ext, {struct, timesync_res(TSyncReq)}}.
+  
 now_in_millis() ->
   {Mega, Sec, Micro} = now(),
 	trunc(((Mega * 1000000) + Sec) * 1000 + (Micro / 1000) + 0.5).
