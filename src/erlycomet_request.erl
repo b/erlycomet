@@ -96,7 +96,8 @@ handle(Req, #parsed_req{message = Msg, jsonp = Callback})
     case process_bayeux_msg(Req, json_decode(Msg), Callback) of
       done -> ok;
       [done] -> ok;
-      Body -> 
+      Body ->
+        ?LOG_INFO_FORMAT("~p:handle/2 parsed_req | ~p~n", [?MODULE, Body]),
         Resp = callback_wrapper(json_encode(Body), Callback),       
         Req:ok({"text/javascript;charset=UTF-8", Resp})   
     end;       
@@ -108,7 +109,7 @@ handle(Req, #parsed_req{message = Msg})
       Body -> Req:ok({"text/json", json_encode(Body)})
     end;        
 handle(Req, _Parsed) ->
-  io:format("Not found for parsed: ~p~n", [_Parsed]),
+  ?LOG_INFO_FORMAT("Not found for parsed: ~p~n", [_Parsed]),
   Req:not_found().
 
 
@@ -139,8 +140,8 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
   % Advice = {struct, [{reconnect, "retry"},
   %                   {interval, 5000}]},
   % - get the alert from 
-  Ext = get_json_map_val(<<"ext">>, Struct),
-  TSyncReq = timesync_req(proplists:get_value(timesync, Ext)),
+  {struct, Ext} = get_json_map_val(<<"ext">>, Struct),
+  TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),
   
   Id = generate_id(),
   erlycomet_api:replace_connection(Id, 0, handshake),
@@ -157,17 +158,17 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
 process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->  
   ClientId = get_json_map_val(<<"clientId">>, Struct),
   ConnectionType = get_json_map_val(<<"connectionType">>, Struct),
-  Ext = get_json_map_val(<<"ext">>, Struct),
-  TSyncReq = timesync_req(proplists:get_value(timesync, Ext)),
+  {struct, Ext} = get_json_map_val(<<"ext">>, Struct),
+  TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),
   
   L = [{channel,  Channel}, {clientId, ClientId}],    
   case erlycomet_api:replace_connection(ClientId, self(), connected) of
     {ok, Status} when Status =:= ok ; Status =:= replaced_hs ->
       {struct,
-        lists:flatten(
+        lists:flatten([
           [timesync_ext(TSyncReq)],
           [{successful, true}],
-          L)};
+          L])};
     % don't reply immediately to new connect message.
     % instead wait. when new message is received, reply to connect and 
     % include the new message.  This is acceptable given bayeux spec. see section 4.2.2
@@ -181,10 +182,10 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
           callback = Callback});
     _ ->
       {struct,
-        lists:flatten(
+        lists:flatten([
           [timesync_ext(TSyncReq)],
           [{successful, false}],
-          L)}
+          L])}
   end;    
            
 process_cmd(Req, <<"/meta/disconnect">> = Channel, Struct, _) ->  
@@ -210,12 +211,12 @@ process_cmd(Req, Channel, Struct, _) ->
 process_cmd1(_, Channel, undefined) ->
   {struct, [{<<"channel">>, Channel}, {successful, false}]};       
 process_cmd1(Req, Channel, Id) ->
-  process_cmd2(Req, Channel, Id), erlycomet_api:connection(Id).
+  process_cmd2(Req, Channel, Id).
 
 process_cmd1(_, Channel, undefined, _) ->   
   {struct, [{<<"channel">>, Channel}, {successful, false}]};  
 process_cmd1(Req, Channel, Id, Data) ->
-  process_cmd2(Req, Channel, Id, Data), erlycomet_api:connection(Id).
+  process_cmd2(Req, Channel, Id, Data).
        
         
 process_cmd2(_, <<"/meta/disconnect">> = Channel, ClientId) -> 
@@ -275,6 +276,7 @@ json_decode(Str) ->
   mochijson2:decode(Str).
     
 json_encode(Body) ->
+  ?LOG_INFO_FORMAT("~p:json_encode | ~p~n", [?MODULE, Body]),
   mochijson2:encode(Body).
 
 
@@ -358,10 +360,12 @@ rpc(Msg, _) -> Msg.
 % o is the clock offset that the client has calculated
 %
 %%
-timesync_req(ClientReq) ->
-  TC = proplists:get_value(tc, ClientReq, now_in_millis()),
-  L = proplists:get_value(l, ClientReq, 0),
-  O = proplists:get_value(o, ClientReq, 0),
+timesync_req(undefined) ->
+  #timesync{};
+timesync_req({struct, ClientReq}) ->
+  TC = proplists:get_value(<<"tc">>, ClientReq, now_in_millis()),
+  L = proplists:get_value(<<"l">>, ClientReq, 0),
+  O = proplists:get_value(<<"o">>, ClientReq, 0),
 
   #timesync{ts=now_in_millis(), tc=TC, l=L, o=O}.
 
@@ -392,6 +396,8 @@ timesync_res(#timesync{ts=TS, tc=TC, l=L, o=O}) ->
       [{timesync, {struct, [{tc, TC}, {ts, TS}, {p, P}, {a, A}]}}]
   end.
 
+timesync_ext(#timesync{ts=0}) ->
+  {ext, {struct, []}};
 timesync_ext(TSyncReq) ->
   {ext, {struct, timesync_res(TSyncReq)}}.
   

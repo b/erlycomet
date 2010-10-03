@@ -102,7 +102,7 @@ ets_tables() ->
     [set, protected, named_table, {heir, self(), []},
 	   {write_concurrency, false}]},
    {channel,
-    [bag, protected, named_table, {heir, self(), []},
+    [bag, public, named_table, {heir, self(), []},
 	   {write_concurrency, false}]}].
 
 init_db() ->
@@ -201,11 +201,21 @@ remove_connection(ClientId) ->
 %% @end 
 %%--------------------------------------------------------------------
 subscribe(ClientId, ChannelName) ->
-  case ets:insert(channel, {ChannelName, ClientId}) of
-    true -> ok;
-    _ -> error
+  case subscribed(ClientId, ChannelName) of
+    true -> error;
+    false ->
+      case ets:insert(channel, {ChannelName, ClientId}) of
+        true -> ok;
+        _ -> error
+      end
   end.
-    
+
+subscribed(ClientId, ChannelName) ->
+  case ets:lookup(channel, ChannelName) of
+    [] -> false; % or {error, channel_not_found} ?
+    Ids -> lists:member(ClientId, Ids)
+  end.
+
     
 %%--------------------------------------------------------------------
 %% @spec (string(), string()) -> ok | error  
