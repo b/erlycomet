@@ -99,11 +99,11 @@ code_change(_OldVsn, S, _Extra) -> {ok, S}.
 %%
 ets_tables() ->
   [{connection,
-    [set, public, named_table, {heir, self(), []}, 
+    [set, protected, named_table, {heir, self(), []},
 	   {write_concurrency, false}]},
    {channel,
-    [bag, public, named_table, {heir, self(), []}, 
-	   {write_concurrency, false}]}].       
+    [bag, protected, named_table, {heir, self(), []},
+	   {write_concurrency, false}]}].
 
 init_db() ->
   [create_table(Name, Args) || {Name, Args} <- ets_tables()].

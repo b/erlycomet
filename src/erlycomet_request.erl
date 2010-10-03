@@ -385,7 +385,7 @@ timesync_req(ClientReq) ->
 timesync_res(#timesync{ts=TS, tc=TC, l=L, o=O}) ->
   Now = now_in_millis(),
   P = Now - TS,
-  A = TC - now_in_millis() - L - O,
+  A = TC - Now - L - O,
   case A > ?accuracy_target of
     true -> [];
     false ->
