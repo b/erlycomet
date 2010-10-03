@@ -188,7 +188,7 @@ connection_pid(ClientId) ->
 %% @end 
 %%--------------------------------------------------------------------  
 remove_connection(ClientId) ->
-  case ets:delete(ClientId) of
+  case ets:delete(connection, ClientId) of
     true -> ok;
     _ -> error
   end.
