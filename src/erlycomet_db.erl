@@ -102,7 +102,7 @@ ets_tables() ->
     [set, protected, named_table, {heir, self(), []},
 	   {write_concurrency, false}]},
    {channel,
-    [bag, public, named_table, {heir, self(), []},
+    [bag, protected, named_table, {heir, self(), []},
 	   {write_concurrency, false}]}].
 
 init_db() ->
