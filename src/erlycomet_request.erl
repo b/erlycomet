@@ -45,6 +45,7 @@
 -include_lib("include/erlycomet.hrl").
 
 -define(accuracy_target, 25).
+-define(connection_types, [<<"long-polling">>, <<"callback-polling">>]).
 
 -record(timesync, {
     ts = 0,
@@ -140,20 +141,36 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
   % Advice = {struct, [{reconnect, "retry"},
   %                   {interval, 5000}]},
   % - get the alert from 
-  {struct, Ext} = get_json_map_val(<<"ext">>, Struct),
-  TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),
-  
-  Id = generate_id(),
-  erlycomet_api:replace_connection(Id, 0, handshake),
-  {struct, [
-    {channel, Channel}, 
-    {version, 1.0},
-    {supportedConnectionTypes, [
-        <<"long-polling">>,
-        <<"callback-polling">>]},
-    {clientId, Id},
-    timesync_ext(TSyncReq),
-    {successful, true}]};
+  ConnectionTypes =
+    get_json_map_val(<<"supportedConnectionTypes">>, Struct),
+  ?LOG_INFO_FORMAT("~p: offered connection types | ~p~n",
+    [?MODULE, ConnectionTypes]),
+  ValidConnType = 
+    lists:any(fun(Type) ->
+                lists:member(Type, ?connection_types)
+              end,
+              ConnectionTypes),
+  case ValidConnType of
+    true ->
+      {struct, Ext} = get_json_map_val(<<"ext">>, Struct),
+      TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),  
+      Id = generate_id(),
+      erlycomet_api:replace_connection(Id, 0, handshake),
+      {struct, [
+        {channel, Channel}, 
+        {version, 1.0},
+        {supportedConnectionTypes, ?connection_types},
+        {clientId, Id},
+        timesync_ext(TSyncReq),
+        {successful, true}]};
+    _ ->
+      {struct, [
+        {channel, Channel}, 
+        {version, 1.0},
+        {supportedConnectionTypes, ?connection_types},
+        {error, "No common connection types"},
+        {successful, false}]}
+  end;
     
 process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->  
   ClientId = get_json_map_val(<<"clientId">>, Struct),
@@ -163,7 +180,7 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
   
   L = [{channel,  Channel}, {clientId, ClientId}],    
   case erlycomet_api:replace_connection(ClientId, self(), connected) of
-    {ok, Status} when Status =:= ok ; Status =:= replaced_hs ->
+    {ok, Status} when Status =:= created ; Status =:= replaced_hs ->
       {struct,
         lists:flatten([
           [timesync_ext(TSyncReq)],
@@ -180,11 +197,11 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
           timesync = TSyncReq,
           events = [Msg],
           callback = Callback});
-    _ ->
+    {error, Reason} ->
+      ?LOG_INFO_FORMAT("~p: process_cmd(connect) | ~p~n", [?MODULE, Reason]),
       {struct,
         lists:flatten([
-          [timesync_ext(TSyncReq)],
-          [{successful, false}],
+          [advise(retry), {successful, false}, {error, Reason}],
           L])}
   end;    
            
@@ -230,8 +247,10 @@ process_cmd2(_, <<"/meta/disconnect">> = Channel, ClientId) ->
 process_cmd2(_, <<"/meta/subscribe">> = Channel, ClientId, Subscription) ->    
   L = [{channel, Channel}, {clientId, ClientId}, {subscription, Subscription}],
   case erlycomet_api:subscribe(ClientId, Subscription) of
-    ok -> {struct, [{successful, true}  | L]};
-    _ ->  {struct, [{successful, false}  | L]}
+    ok -> {struct, [{successful, true} | L]};
+    {error, Message} ->
+          {struct, [{successful, false} | [ {error, Message} | L]]};
+    _ ->  {struct, [{successful, false} | [ {error, "Server error"} | L]]}
   end;  
          
 process_cmd2(_, <<"/meta/unsubscribe">> = Channel, ClientId, Subscription) ->  
@@ -302,15 +321,17 @@ loop(Resp, #state{events=Events, id=Id,
       disconnect(Resp, Id, State);
     {add, Event} -> 
       loop(Resp, State#state{events=[Event | Events]});      
-    {flush, Event} ->
-      Event1 = [timesync_ext(TSyncReq) | Event],
+    {flush, {struct, Event}} ->
+      Event1 = {struct, [timesync_ext(TSyncReq) | Event]},
       Events2 = [Event1 | Events],
+      ?LOG_INFO_FORMAT("~p: flush+event | ~p~n", [?MODULE, Events2]),
       send(Resp, events_to_json_struct(Events2, Id), Callback),
       done;                
     flush ->
-      [Event | Events2] = Events,
-      Event1 = [timesync_ext(TSyncReq) | Event],
+      [{struct, Event} | Events2] = Events,
+      Event1 = {struct, [timesync_ext(TSyncReq) | Event]},
       Events3 = [Event1 | Events2],
+      ?LOG_INFO_FORMAT("~p: flush | ~p~n", [?MODULE, Events3]),
       send(Resp, events_to_json_struct(Events3, Id), Callback),
       done 
   after State#state.timeout ->
@@ -404,3 +425,6 @@ timesync_ext(TSyncReq) ->
 now_in_millis() ->
   {Mega, Sec, Micro} = now(),
 	trunc(((Mega * 1000000) + Sec) * 1000 + (Micro / 1000) + 0.5).
+
+advise(Advice) ->
+  {advice, {struct, [{reconnect, Advice}, {retry, 0}]}}.
