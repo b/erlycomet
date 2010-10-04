@@ -43,7 +43,7 @@ channels() ->
 deliver_to_connection(ClientId, Channel, Data) ->
   gen_server:call(erlycomet_db, {deliver_to_connection, ClientId, Channel, Data}).
 
-deliver_to_channel(ClientId, Channel) ->
-  gen_server:call(erlycomet_db, {deliver_to_channel, ClientId, Channel}).
+deliver_to_channel(Channel, Data) ->
+  gen_server:call(erlycomet_db, {deliver_to_channel, Channel, Data}).
 
 
