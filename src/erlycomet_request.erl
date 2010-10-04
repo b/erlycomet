@@ -145,7 +145,7 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
     get_json_map_val(<<"supportedConnectionTypes">>, Struct),
   ?LOG_INFO_FORMAT("~p: offered connection types | ~p~n",
     [?MODULE, ConnectionTypes]),
-  ValidConnType = 
+  ValidConnType =
     lists:any(fun(Type) ->
                 lists:member(Type, ?connection_types)
               end,
@@ -153,11 +153,11 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
   case ValidConnType of
     true ->
       {struct, Ext} = get_json_map_val(<<"ext">>, Struct),
-      TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),  
+      TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),
       Id = generate_id(),
-      erlycomet_api:replace_connection(Id, 0, handshake),
+      erlycomet:replace_connection(Id, 0, handshake),
       {struct, [
-        {channel, Channel}, 
+        {channel, Channel},
         {version, 1.0},
         {supportedConnectionTypes, ?connection_types},
         {clientId, Id},
@@ -165,7 +165,7 @@ process_cmd(_Req, <<"/meta/handshake">> = Channel, Struct, _) ->
         {successful, true}]};
     _ ->
       {struct, [
-        {channel, Channel}, 
+        {channel, Channel},
         {version, 1.0},
         {supportedConnectionTypes, ?connection_types},
         {error, "No common connection types"},
@@ -179,7 +179,7 @@ process_cmd(Req, <<"/meta/connect">> = Channel, Struct, Callback) ->
   TSyncReq = timesync_req(proplists:get_value(<<"timesync">>, Ext)),
   
   L = [{channel,  Channel}, {clientId, ClientId}],    
-  case erlycomet_api:replace_connection(ClientId, self(), connected) of
+  case erlycomet:replace_connection(ClientId, self(), connected) of
     {ok, Status} when Status =:= created ; Status =:= replaced_hs ->
       {struct,
         lists:flatten([
@@ -238,7 +238,7 @@ process_cmd1(Req, Channel, Id, Data) ->
         
 process_cmd2(_, <<"/meta/disconnect">> = Channel, ClientId) -> 
   L = [{channel, Channel}, {clientId, ClientId}],
-  case erlycomet_api:remove_connection(ClientId) of
+  case erlycomet:remove_connection(ClientId) of
     ok -> {struct, [{successful, true}  | L]};
     _ ->  {struct, [{successful, false}  | L]}
   end. 
@@ -246,7 +246,7 @@ process_cmd2(_, <<"/meta/disconnect">> = Channel, ClientId) ->
                      
 process_cmd2(_, <<"/meta/subscribe">> = Channel, ClientId, Subscription) ->    
   L = [{channel, Channel}, {clientId, ClientId}, {subscription, Subscription}],
-  case erlycomet_api:subscribe(ClientId, Subscription) of
+  case erlycomet:subscribe(ClientId, Subscription) of
     ok -> {struct, [{successful, true} | L]};
     {error, Message} ->
           {struct, [{successful, false} | [ {error, Message} | L]]};
@@ -255,14 +255,14 @@ process_cmd2(_, <<"/meta/subscribe">> = Channel, ClientId, Subscription) ->
          
 process_cmd2(_, <<"/meta/unsubscribe">> = Channel, ClientId, Subscription) ->  
   L = [{channel, Channel}, {clientId, ClientId}, {subscription, Subscription}],          
-  case erlycomet_api:unsubscribe(ClientId, Subscription) of
+  case erlycomet:unsubscribe(ClientId, Subscription) of
     ok -> {struct, [{successful, true}  | L]};
     _ ->  {struct, [{successful, false}  | L]}
   end;  
     
 process_cmd2(_, <<$/, $s, $e, $r, $v, $i, $c, $e, $/, _/binary>> = Channel, ClientId, Data) ->  
   L = [{"channel", Channel}, {"clientId", ClientId}],
-  case erlycomet_api:deliver_to_connection(ClientId, Channel, Data) of
+  case erlycomet:deliver_to_connection(ClientId, Channel, Data) of
     ok -> {struct, [{"successful", true}  | L]};
     _ ->  {struct, [{"successful", false}  | L]}
   end;   
@@ -282,7 +282,7 @@ authenticate_channel_write(ClientId, Channel) ->
   end.
 
 try_deliver_channel(Channel, ClientId, Data) ->
-  case erlycomet_api:deliver_to_channel(Channel, Data) of
+  case erlycomet:deliver_to_channel(Channel, Data) of
     ok -> result_struct(Channel, ClientId, true);
     _ ->  result_struct(Channel, ClientId, false)
   end.
@@ -308,7 +308,7 @@ callback_wrapper(Data, Callback) ->
 generate_id() ->
   <<Num:128>> = crypto:rand_bytes(16),
   [HexStr] = io_lib:fwrite("~.16B",[Num]),
-  case erlycomet_api:connection_pid(HexStr) of
+  case erlycomet:connection_pid(HexStr) of
     undefined -> HexStr;
     _ -> generate_id()
   end.
@@ -350,7 +350,7 @@ send(Resp, Data, Callback) ->
     
     
 disconnect(Resp, Id, Callback) ->
-  erlycomet_api:remove_connection(Id),
+  erlycomet:remove_connection(Id),
   Msg = {struct, [{channel, <<"/meta/disconnect">>}, {successful, true}, {clientId, Id}]},
   Chunk = callback_wrapper(json_encode(Msg), Callback),
   Resp:write_chunk(Chunk),

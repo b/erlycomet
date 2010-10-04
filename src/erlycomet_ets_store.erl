@@ -32,7 +32,7 @@
 %%% THE SOFTWARE.
 %%%
 %%%---------------------------------------------------------------------------------------
--module(erlycomet_db).
+-module(erlycomet_ets_store).
 -author('rsaccon@gmail.com').
 -author('telarson@gmail.com').
 -author('b@b3k.us').
@@ -46,7 +46,7 @@
 -export([stop/0, terminate/2, code_change/3]).
 
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+	gen_server:start_link({local, erlycomet_store}, ?MODULE, [], []).
 
 init(_) ->
 	init_db(),
@@ -83,11 +83,8 @@ handle_call({unsubscribe, ClientId, ChannelName}, _, S) ->
 handle_call({channels}, _, S) ->
   Res = channels(),
   {reply, Res, S};
-handle_call({deliver_to_connection, ClientId, Channel, Data}, _, S) ->
-  Res = deliver_to_connection(ClientId, Channel, Data),
-  {reply, Res, S};
-handle_call({deliver_to_channel, Channel, Data}, _, S) ->
-  Res = deliver_to_channel(Channel, Data),
+handle_call({subscriber_pids, Channel}, _, S) ->
+  Res = subscriber_pids(Channel),
   {reply, Res, S}.
 
 stop() -> ok.
@@ -134,7 +131,7 @@ add_connection(ClientId, Pid, State) ->
   end.	
 
 %%-------------------------------------------------------------------------
-%% @spec (string(), pid(), CommentFiltered) -> {ok, new} | {ok, replaced} | error 
+%% @spec (string(), pid(), atom()) -> {ok, new} | {ok, replaced} | error 
 %% @doc
 %% replaces a connection
 %% @end
@@ -150,7 +147,7 @@ replace_connection(ClientId, Pid, NewState) ->
       end,
       {add_connection(ClientId, Pid, NewState), Res};
     _ ->
-      {error, "Database failure"} 
+      {error, "Database failure"}
   end.
        
           
@@ -193,7 +190,7 @@ remove_connection(ClientId) ->
   %% Need to also delete all channel entries for this client
   % {{'$1', ClientId}}
   % qlc:e(qlc:q([X || X <- ets:table(channel)])).
-  
+
   case ets:delete(connection, ClientId) of
     true -> ok;
     _ -> {error, "Database failure"}
@@ -247,78 +244,14 @@ channels() ->
 
 
 %%--------------------------------------------------------------------
-%% @spec (string(), string(), tuple()) -> ok | {error, connection_not_found} 
+%% @spec (string()) -> list() 
 %% @doc
-%% delivers data to one connection
-%% @end 
-%%--------------------------------------------------------------------  
-deliver_to_connection(ClientId, Channel, Data) ->
-  Event = {struct, [{channel, Channel},  {data, Data}]},
-  case connection_pid(ClientId) of
-    undefined -> {error, connection_not_found};
-    Pid ->
-      Pid ! {flush, Event},
-      ok
-  end.
-    
-
-%%--------------------------------------------------------------------
-%% @spec  (string(), tuple()) -> ok | {error, channel_not_found} 
-%% @doc
-%% delivers data to all connections of a channel
+%% returns a list of client pids for a channel
 %% @end 
 %%--------------------------------------------------------------------
-deliver_to_channel(Channel, Data) ->
-  globbing(fun deliver_to_single_channel/3, Channel, Data).
-    
-
-%%--------------------------------------------------------------------
-%%% Internal functions
-%%--------------------------------------------------------------------
-
-globbing(Fun, Channel, Data) ->
-  ChannelString = binary_to_list(Channel),
-  lists:map(fun(SubscriberChannel) ->
-    case lists:reverse(binary_to_list(SubscriberChannel)) of
-      [$*, $* | T] ->
-        case string:str(ChannelString, lists:reverse(T)) of
-          1 ->
-            Fun(SubscriberChannel, Channel, Data);
-          _ ->
-            skip
-        end;               
-      [$* | T] ->
-          case string:str(ChannelString, lists:reverse(T)) of
-            1 -> 
-              Tokens = string:tokens(string:sub_string(ChannelString, length(T) + 1), "/"),
-              case Tokens of
-                [_] ->
-                  Fun(SubscriberChannel, Channel, Data);
-                _ ->
-                  skip
-              end;
-            _ -> 
-              skip
-          end;         
-      Any ->
-        Fun(Channel, Channel, Data)
-    end
-  end,
-  channels()).
-
-
-deliver_to_single_channel(SubscriberChannel, Channel, Data) ->            
-  Event = {struct, [{channel, Channel}, {data, Data}]},  
-  case ets:lookup(channel, SubscriberChannel) of %% needs to be match spec!
-    [] -> ok; % or {error, channel_not_found} ?
-    Ids ->
-      [send_event(connection_pid(ClientId), Event) || {_, ClientId} <- Ids],
-      ok
+subscriber_pids(Channel) ->
+  case ets:lookup(channel, Channel) of
+    [] -> [];
+    Subscribers ->
+      [connection_pid(ClientId) || {_, ClientId} <- Subscribers]
   end.
-     
-
-send_event(Pid, Event) when is_pid(Pid)->
-  Pid ! {flush, Event};
-send_event(_, _) ->
-  ok.
-

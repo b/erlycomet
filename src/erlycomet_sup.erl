@@ -78,9 +78,9 @@ upgrade() ->
 %% @end 
 %%--------------------------------------------------------------------
 init([]) ->	
-  CometDb = {erlycomet_db,
-    {erlycomet_db, start_link, []},
-        permanent, 1000, worker, [erlycomet_db]},
+  CometDb = {erlycomet_store,
+    {erlycomet_ets_store, start_link, []},
+        permanent, 1000, worker, [erlycomet_ets_store]},
   Processes = [CometDb],
   {ok, {{one_for_one, 9, 10}, Processes}}.
 
