@@ -86,8 +86,8 @@ handle_call({channels}, _, S) ->
 handle_call({deliver_to_connection, ClientId, Channel, Data}, _, S) ->
   Res = deliver_to_connection(ClientId, Channel, Data),
   {reply, Res, S};
-handle_call({deliver_to_channel, ClientId, Channel}, _, S) ->
-  Res = deliver_to_channel(ClientId, Channel),
+handle_call({deliver_to_channel, Channel, Data}, _, S) ->
+  Res = deliver_to_channel(Channel, Data),
   {reply, Res, S}.
 
 stop() -> ok.
@@ -130,7 +130,7 @@ add_connection(ClientId, Pid, State) ->
   Conn = #connection{client_id=ClientId, pid=Pid, state=State},
 	case ets:insert(connection, {ClientId, Conn}) of
 	  true -> ok;
-    _ -> error
+    _ -> {error, "Database failure"}
   end.	
 
 %%-------------------------------------------------------------------------
@@ -140,16 +140,18 @@ add_connection(ClientId, Pid, State) ->
 %% @end
 %%-------------------------------------------------------------------------
 replace_connection(ClientId, Pid, NewState) ->
-  Status = case connection(ClientId) of
-    undefined -> new;
+  case connection(ClientId) of
+    undefined ->
+      {add_connection(ClientId, Pid, NewState), created};
     #connection{state=State} ->
-      case State of
+      Res = case State of
         handshake -> replaced_hs;
         _ -> replaced
-      end;
-    _ -> new
-  end,
-  {add_connection(ClientId, Pid, NewState), Status}.
+      end,
+      {add_connection(ClientId, Pid, NewState), Res};
+    _ ->
+      {error, "Database failure"} 
+  end.
        
           
 %%--------------------------------------------------------------------
@@ -165,7 +167,7 @@ connection(ClientId) ->
   case ets:lookup(connection, ClientId) of
 	  [] -> undefined;
 	  [{ClientId, Conn}] -> Conn;
-	  _ -> error
+	  _ -> {error, "Database failure"}
   end.
 
 
@@ -188,9 +190,13 @@ connection_pid(ClientId) ->
 %% @end 
 %%--------------------------------------------------------------------  
 remove_connection(ClientId) ->
+  %% Need to also delete all channel entries for this client
+  % {{'$1', ClientId}}
+  % qlc:e(qlc:q([X || X <- ets:table(channel)])).
+  
   case ets:delete(connection, ClientId) of
     true -> ok;
-    _ -> error
+    _ -> {error, "Database failure"}
   end.
 
 
@@ -202,11 +208,11 @@ remove_connection(ClientId) ->
 %%--------------------------------------------------------------------
 subscribe(ClientId, ChannelName) ->
   case subscribed(ClientId, ChannelName) of
-    true -> error;
+    true -> {error, "Duplicate subscription"};
     false ->
       case ets:insert(channel, {ChannelName, ClientId}) of
         true -> ok;
-        _ -> error
+        _ -> {error, "Database failure"}
       end
   end.
 
@@ -226,7 +232,7 @@ subscribed(ClientId, ChannelName) ->
 unsubscribe(ClientId, ChannelName) ->
   case ets:delete_object(channel, {ChannelName, ClientId}) of
     true -> ok;
-    _ -> error
+    _ -> {error, "Database failure"}
   end.
 
 
@@ -263,7 +269,7 @@ deliver_to_connection(ClientId, Channel, Data) ->
 %% @end 
 %%--------------------------------------------------------------------
 deliver_to_channel(Channel, Data) ->
-  globbing(fun deliver_to_single_channel/2, Channel, Data).
+  globbing(fun deliver_to_single_channel/3, Channel, Data).
     
 
 %%--------------------------------------------------------------------
@@ -271,41 +277,39 @@ deliver_to_channel(Channel, Data) ->
 %%--------------------------------------------------------------------
 
 globbing(Fun, Channel, Data) ->
-  case lists:reverse(binary_to_list(Channel)) of
-    [$*, $* | T] ->
-      lists:map(fun
-            (X) ->
-              case string:str(X, lists:reverse(T)) of
-                1 ->
-                  Fun(Channel, Data);
-                _ -> 
+  ChannelString = binary_to_list(Channel),
+  lists:map(fun(SubscriberChannel) ->
+    case lists:reverse(binary_to_list(SubscriberChannel)) of
+      [$*, $* | T] ->
+        case string:str(ChannelString, lists:reverse(T)) of
+          1 ->
+            Fun(SubscriberChannel, Channel, Data);
+          _ ->
+            skip
+        end;               
+      [$* | T] ->
+          case string:str(ChannelString, lists:reverse(T)) of
+            1 -> 
+              Tokens = string:tokens(string:sub_string(ChannelString, length(T) + 1), "/"),
+              case Tokens of
+                [_] ->
+                  Fun(SubscriberChannel, Channel, Data);
+                _ ->
                   skip
-              end                        
-        end, channels());
-    [$* | T] ->
-      lists:map(fun
-            (X) ->
-              case string:str(X, lists:reverse(T)) of
-                1 -> 
-                  Tokens = string:tokens(string:sub_string(X, length(T) + 1), "/"),
-                  case Tokens of
-                    [_] ->
-                      Fun(Channel, Data);
-                    _ ->
-                      skip
-                  end;
-                _ -> 
-                  skip
-              end                        
-        end, channels());
-    _ ->
-      Fun(Channel, Data)
-  end.
+              end;
+            _ -> 
+              skip
+          end;         
+      Any ->
+        Fun(Channel, Channel, Data)
+    end
+  end,
+  channels()).
 
 
-deliver_to_single_channel(Channel, Data) ->            
+deliver_to_single_channel(SubscriberChannel, Channel, Data) ->            
   Event = {struct, [{channel, Channel}, {data, Data}]},  
-  case ets:lookup(channel, Channel) of
+  case ets:lookup(channel, SubscriberChannel) of %% needs to be match spec!
     [] -> ok; % or {error, channel_not_found} ?
     Ids ->
       [send_event(connection_pid(ClientId), Event) || {_, ClientId} <- Ids],
