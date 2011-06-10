@@ -1,4 +1,4 @@
-all: compile
+all: dist compile
 
 compile:
 	@./rebar compile
